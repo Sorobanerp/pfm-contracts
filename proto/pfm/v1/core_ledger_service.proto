@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package pfm.v1;
+
+option go_package = "github.com/sorobanerp/pfm-contracts/gen/go/pfm/v1;pfmv1";
+option java_multiple_files = true;
+option java_outer_classname = "CoreLedgerServiceProto";
+option java_package = "com.sorobanerp.pfm.v1";
+
+// ============================================================================
+// Core Ledger Synchronous gRPC Contract (HTTP/2)
+// Exposed by: `pfm-core-ledger-java` (Java 25 LTS / Spring Boot 4)
+// Monetary Precision: All monetary values and percentages use exact decimal `string`.
+// ============================================================================
+
+service CoreLedgerService {
+  // Reconciles an extracted NFC-e fiscal receipt against credit card statement transactions
+  // and detects item-level price inflation (>10% unit price increase per EAN barcode).
+  rpc ProcessReceipt(ProcessReceiptRequest) returns (ProcessReceiptResponse);
+
+  // Retrieves the consolidated Multi-Card Matrix, Current Invoice, M+1 Forecast,
+  // and Future Income Commitment summary for a tenant.
+  rpc GetTenantFinancialSummary(GetTenantFinancialSummaryRequest) returns (GetTenantFinancialSummaryResponse);
+}
+
+// Line item input for synchronous receipt reconciliation and EAN inflation analysis.
+message ReceiptLineItemInput {
+  // Sequential line number on the receipt.
+  int32 item_sequence = 1;
+  // EAN-8 / EAN-13 / GTIN barcode identifier.
+  string ean = 2;
+  // Normalized product description.
+  string description = 3;
+  // Purchased quantity as exact decimal string (e.g., "2.000").
+  string quantity = 4;
+  // Unit of measure (e.g., "UN", "KG").
+  string unit_of_measure = 5;
+  // Current purchase unit price as exact decimal string (e.g., "32.90").
+  string unit_price = 6;
+  // Total item amount as exact decimal string (e.g., "65.80").
+  string total_price = 7;
+}
+
+message ProcessReceiptRequest {
+  // Zero-Trust tenant identifier (UUID).
+  string tenant_id = 1;
+  // Deterministic SHA-256 idempotency key for safe retries.
+  string idempotency_key = 2;
+  // 44-digit SEFAZ NFC-e access key.
+  string access_key = 3;
+  // Merchant CNPJ (14 digits).
+  string merchant_tax_id = 4;
+  // Merchant name as printed on the fiscal document.
+  string merchant_name = 5;
+  // Receipt emission timestamp in ISO-8601 format.
+  string issued_at = 6;
+  // Exact decimal total paid on the receipt (e.g., "348.50").
+  string total_amount = 7;
+  // ISO-4217 currency code (e.g., "BRL").
+  string currency = 8;
+  // Optional target credit card or bank account ID for direct reconciliation.
+  string card_id = 9;
+  // Extracted line items for granular categorization and EAN price history comparison.
+  repeated ReceiptLineItemInput items = 10;
+}
+
+// Alert generated when an item's unit price increases strictly above the 10% threshold (>10%) by EAN.
+message EanInflationAlert {
+  // Product EAN barcode.
+  string ean = 1;
+  // Product description.
+  string description = 2;
+  // Previous recorded unit price for this EAN as exact decimal string (e.g., "28.00").
+  string previous_unit_price = 3;
+  // Current receipt unit price as exact decimal string (e.g., "32.90").
+  string current_unit_price = 4;
+  // Calculated inflation percentage as exact decimal string (e.g., "17.50" for +17.50%).
+  string inflation_percentage = 5;
+  // ISO-8601 date of the baseline purchase used for comparison.
+  string previous_purchase_date = 6;
+  // Merchant name of the baseline purchase.
+  string previous_merchant_name = 7;
+}
+
+message ProcessReceiptResponse {
+  // Internal receipt UUID persisted in the ledger.
+  string receipt_id = 1;
+  // Reconciliation status ("MATCHED_STATEMENT_LINE", "PENDING_STATEMENT", "CREATED_CASH_ENTRY").
+  string reconciliation_status = 2;
+  // Matched credit card statement transaction ID (if reconciled against an invoice line).
+  string matched_transaction_id = 3;
+  // Committed double-entry journal entry ID in the Core Ledger.
+  string journal_entry_id = 4;
+  // Reconciliation confidence score as exact decimal string (0.00 to 1.00).
+  string match_confidence = 5;
+  // True if one or more EAN items exceeded the >10% price inflation threshold.
+  bool has_inflation_alerts = 6;
+  // List of EAN items exhibiting >10% unit price inflation compared to historical baseline.
+  repeated EanInflationAlert inflation_alerts = 7;
+}
+
+message GetTenantFinancialSummaryRequest {
+  // Zero-Trust tenant identifier (UUID).
+  string tenant_id = 1;
+  // Reference competence month in YYYY-MM format (e.g., "2026-11").
+  string reference_month = 2;
+  // ISO-4217 currency filter (defaults to "BRL").
+  string currency = 3;
+}
+
+// Per-card breakdown inside the Multi-Card Matrix.
+message CreditCardMatrixEntry {
+  // Unique credit card identifier.
+  string card_id = 1;
+  // Card label / issuer name (e.g., "Nubank Ultravioleta", "Itau Personalite Visa Infinite").
+  string card_name = 2;
+  // Last 4 digits of the card.
+  string card_last_four = 3;
+  // Total credit limit assigned to the card as exact decimal string.
+  string credit_limit = 4;
+  // Available credit limit considering all future installments as exact decimal string.
+  string available_limit = 5;
+  // Current open/closed invoice amount (Fatura Atual) as exact decimal string.
+  string current_invoice_amount = 6;
+  // Next month (M+1) projected invoice amount from active installments and recurrences as exact decimal string.
+  string next_month_invoice_amount = 7;
+  // Total future committed balance beyond M+1 (M+2..M+N) as exact decimal string.
+  string future_committed_amount = 8;
+  // Invoice closing day of month (1-31).
+  int32 closing_day = 9;
+  // Invoice due day of month (1-31).
+  int32 due_day = 10;
+}
+
+// Monthly future commitment projection bucket.
+message FutureCommitmentBucket {
+  // Target competence month in YYYY-MM format (e.g., "2026-12", "2027-01").
+  string competence_month = 1;
+  // Total committed installments across all cards as exact decimal string.
+  string cards_installments_amount = 2;
+  // Total committed fixed contracts/loans (SAC/Price/Consorcio) as exact decimal string.
+  string contracts_amount = 3;
+  // Combined monthly commitment amount as exact decimal string.
+  string total_committed_amount = 4;
+  // Percentage of monthly net income compromised in this bucket as exact decimal string (e.g., "42.35").
+  string income_commitment_percentage = 5;
+}
+
+message GetTenantFinancialSummaryResponse {
+  // Tenant UUID.
+  string tenant_id = 1;
+  // Reference competence month (YYYY-MM).
+  string reference_month = 2;
+  // ISO-4217 currency code.
+  string currency = 3;
+  // Consolidated Current Invoice total across all cards (Fatura Atual) as exact decimal string.
+  string total_current_invoice = 4;
+  // Consolidated M+1 Invoice projection across all cards as exact decimal string.
+  string total_next_month_invoice = 5;
+  // Total multi-month future commitment (Comprometimento Futuro Total) as exact decimal string.
+  string total_future_commitment = 6;
+  // Current month net income commitment percentage as exact decimal string (e.g., "38.75").
+  string current_income_commitment_pct = 7;
+  // Multi-Card Matrix (Matriz Multi-Cartoes) detailing each card's current, M+1, and future load.
+  repeated CreditCardMatrixEntry card_matrix = 8;
+  // Forward-looking monthly commitment timeline (M+1 through M+12).
+  repeated FutureCommitmentBucket future_commitment_timeline = 9;
+}

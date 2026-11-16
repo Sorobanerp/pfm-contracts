@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package pfm.v1;
+
+option go_package = "github.com/sorobanerp/pfm-contracts/gen/go/pfm/v1;pfmv1";
+option java_multiple_files = true;
+option java_outer_classname = "ForecastServiceProto";
+option java_package = "com.sorobanerp.pfm.v1";
+
+// ============================================================================
+// Forecast & Amortization Engine Synchronous gRPC Contract (HTTP/2)
+// Exposed by: `pfm-forecast-engine-go` (Golang)
+// Supports: SAC (Sistema de Amortizacao Constante), Price (French System), and Consorcio.
+// Monetary Precision: All monetary values and rates use exact decimal `string`.
+// ============================================================================
+
+service ForecastService {
+  // Simulates contract amortization schedules and extra-payment strategies (term reduction vs.
+  // installment reduction) across SAC, Price, and Consorcio modalities, calculating net interest savings.
+  rpc SimulateContractAmortization(SimulateContractRequest) returns (SimulateContractResponse);
+}
+
+// Amortization system modality supported by the quantitative engine.
+enum AmortizationSystem {
+  AMORTIZATION_SYSTEM_UNSPECIFIED = 0;
+  // Sistema de Amortizacao Constante (constant principal amortization, decreasing installments).
+  AMORTIZATION_SYSTEM_SAC = 1;
+  // Tabela Price / Sistema Frances (constant installments, increasing principal amortization).
+  AMORTIZATION_SYSTEM_PRICE = 2;
+  // Consorcio (administration fee + reserve fund over letter of credit, no compound interest).
+  AMORTIZATION_SYSTEM_CONSORCIO = 3;
+}
+
+// Strategy applied when making an extraordinary prepayment / lump-sum amortization.
+enum PrepaymentStrategy {
+  PREPAYMENT_STRATEGY_UNSPECIFIED = 0;
+  // Reduces the remaining number of installments while keeping the monthly installment amount near constant (Reduzir Prazo).
+  PREPAYMENT_STRATEGY_REDUCE_TERM = 1;
+  // Keeps the original remaining term while reducing the monthly installment value (Reduzir Parcela).
+  PREPAYMENT_STRATEGY_REDUCE_INSTALLMENT = 2;
+}
+
+message SimulateContractRequest {
+  // Zero-Trust tenant identifier (UUID).
+  string tenant_id = 1;
+  // Existing contract identifier (optional for ad-hoc simulation).
+  string contract_id = 2;
+  // Contract modality: SAC, PRICE, or CONSORCIO.
+  AmortizationSystem amortization_system = 3;
+  // Strategy for extraordinary amortization: REDUCE_TERM or REDUCE_INSTALLMENT.
+  PrepaymentStrategy prepayment_strategy = 4;
+  // Current outstanding principal balance (Saldo Devedor Atual) as exact decimal string (e.g., "350000.00").
+  string outstanding_balance = 5;
+  //Remaining term in months (Prazo Remanescente).
+  int32 remaining_installments = 6;
+  // Nominal monthly interest rate as exact decimal string (e.g., "0.0085" for 0.85% a.m.; "0.0000" for Consorcio).
+  string monthly_interest_rate = 7;
+  // Total administration fee rate over credit letter for Consorcio as exact decimal string (e.g., "0.1600" for 16%).
+  string consorcio_admin_fee_rate = 8;
+  // Monthly fixed insurance and administrative charges (MIP + DFI + Taxa de Administracao Mensal) as exact decimal string.
+  string monthly_insurance_and_fees = 9;
+  // Extraordinary lump-sum prepayment amount (Aporte Extraordinario / FGTS) as exact decimal string (e.g., "50000.00").
+  string extra_amortization_amount = 10;
+  // ISO-4217 currency code (defaults to "BRL").
+  string currency = 11;
+}
+
+// Single installment row in an amortization schedule.
+message AmortizationScheduleInstallment {
+  // Installment number (1..N).
+  int32 installment_number = 1;
+  // Competence month in YYYY-MM format.
+  string due_month = 2;
+  // Principal amortization component as exact decimal string.
+  string principal_amount = 3;
+  // Interest component (or Consorcio admin fee component) as exact decimal string.
+  string interest_amount = 4;
+  // Insurance and fixed fees component (MIP/DFI/Taxa) as exact decimal string.
+  string fees_amount = 5;
+  // Total monthly installment paid (Prestacao Total) as exact decimal string.
+  string total_installment_amount = 6;
+  // Remaining principal balance after payment as exact decimal string.
+  string remaining_balance = 7;
+}
+
+// Summary metrics comparing a schedule before or after prepayment.
+message ScheduleSummaryMetrics {
+  // Number of installments in the schedule.
+  int32 total_installments = 1;
+  // First installment total amount as exact decimal string.
+  string first_installment_amount = 2;
+  // Last installment total amount as exact decimal string.
+  string last_installment_amount = 3;
+  // Total interest (or Consorcio admin fees) paid over the remaining life of the contract as exact decimal string.
+  string total_interest_paid = 4;
+  // Total insurance and fixed fees paid over the remaining life of the contract as exact decimal string.
+  string total_fees_paid = 5;
+  // Total cash outflow (principal + interest + fees + extra prepayment) as exact decimal string.
+  string total_paid = 6;
+}
+
+message SimulateContractResponse {
+  // Tenant UUID.
+  string tenant_id = 1;
+  // Echoed contract UUID.
+  string contract_id = 2;
+  // Evaluated amortization modality (SAC, PRICE, CONSORCIO).
+  AmortizationSystem amortization_system = 3;
+  // Evaluated prepayment strategy (REDUCE_TERM, REDUCE_INSTALLMENT).
+  PrepaymentStrategy prepayment_strategy = 4;
+  // Baseline schedule summary (without extra amortization).
+  ScheduleSummaryMetrics original_summary = 5;
+  // Simulated schedule summary (after applying extra_amortization_amount).
+  ScheduleSummaryMetrics simulated_summary = 6;
+  // Number of installments eliminated by the prepayment (Economia de Prazo em Meses).
+  int32 installments_reduced = 7;
+  // Immediate reduction in the next monthly installment amount as exact decimal string (Redall/Reducao na Parcela).
+  string monthly_installment_reduction = 8;
+  // Net interest and fee savings achieved by the extra amortization as exact decimal string (Economia Total de Juros e Taxas).
+  string interest_savings_amount = 9;
+  // Effective Return on Investment (ROI) of the prepayment as exact decimal percentage string.
+  string effective_roi_percentage = 10;
+  // Full original installment-by-installment schedule.
+  repeated AmortizationScheduleInstallment original_schedule = 11;
+  // Full simulated installment-by-installment schedule after prepayment.
+  repeated AmortizationScheduleInstallment simulated_schedule = 12;
+}

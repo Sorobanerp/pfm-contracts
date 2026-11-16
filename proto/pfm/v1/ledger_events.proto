@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package pfm.v1;
+
+option go_package = "github.com/sorobanerp/pfm-contracts/gen/go/pfm/v1;pfmv1";
+option java_multiple_files = true;
+option java_outer_classname = "LedgerEventsProto";
+option java_package = "com.sorobanerp.pfm.v1";
+
+// ============================================================================
+// Apache Kafka Asynchronous Domain Events (Protobuf v3)
+// Partitioning Strategy: All events MUST be partitioned by `tenant_id`.
+// Monetary Precision: All monetary values use exact decimal representation in `string` (e.g., "1450.99").
+// Idempotency: All events carry a deterministic SHA-256 `idempotency_key`.
+// ============================================================================
+
+// Event Metadata Envelope for distributed tracing and Zero-Trust Multi-Tenancy (ADR-006).
+message EventMetadata {
+  // Unique event identifier (UUIDv7).
+  string event_id = 1;
+  // Deterministic SHA-256 hash guaranteeing exactly-once processing semantics.
+  string idempotency_key = 2;
+  // Partition key isolating tenant data across Kafka brokers.
+  string tenant_id = 3;
+  // ISO-8601 UTC timestamp of event emission (e.g., "2026-11-16T08:30:00Z").
+  string occurred_at = 4;
+  // W3C TraceContext traceparent header for OpenTelemetry correlation.
+  string trace_id = 5;
+  // Producer service identifier (e.g., "pfm-ingestion-worker-py", "pfm-core-ledger-java").
+  string producer = 6;
+  // Schema semantic version (e.g., "1.0.0").
+  string schema_version = 7;
+}
+
+// Topic: `statement.raw.extracted`
+// Emitted when a raw bank or credit card statement transaction is extracted via OCR/OFX/PDF parser.
+message StatementTransactionExtractedEvent {
+  // Kafka partition key (tenant_id).
+  string tenant_id = 1;
+  // Deterministic SHA-256 hash: sha256(tenant_id + account_id + statement_id + posting_date + amount + raw_description).
+  string idempotency_key = 2;
+  // Event tracing & audit metadata.
+  EventMetadata metadata = 3;
+  // Unique statement document identifier.
+  string statement_id = 4;
+  // Source account or credit card identifier.
+  string account_id = 5;
+  // Card suffix (last 4 digits) for multi-card reconciliation.
+  string card_last_four = 6;
+  // Transaction date in ISO-8601 format (YYYY-MM-DD).
+  string transaction_date = 7;
+  // Raw merchant description extracted from statement line.
+  string raw_description = 8;
+  // Exact decimal monetary amount as string (e.g., "259.90").
+  string amount = 9;
+  // ISO-4217 currency code (e.g., "BRL", "USD").
+  string currency = 10;
+  // Current installment number (0 or 1 for single payment).
+  int32 installment_number = 11;
+  // Total installments for parcelled purchases.
+  int32 total_installments = 12;
+}
+
+// Topic: `tx.categorized`
+// Emitted when an extracted transaction is enriched and categorized by the AI/Rules categorization engine.
+message TransactionCategorizedEvent {
+  // Kafka partition key (tenant_id).
+  string tenant_id = 1;
+  // Deterministic SHA-256 hash: sha256(tenant_id + transaction_id + category_code).
+  string idempotency_key = 2;
+  // Event tracing & audit metadata.
+  EventMetadata metadata = 3;
+  // Unique transaction identifier.
+  string transaction_id = 4;
+  // Canonical merchant name after normalization.
+  string normalized_merchant = 5;
+  // Hierarchical category code (e.g., "FOOD.SUPERMARKET", "HOUSING.UTILITIES").
+  string category_code = 6;
+  // Human-readable category name.
+  string category_name = 7;
+  // Exact decimal monetary amount as string (e.g., "259.90").
+  string amount = 8;
+  // ISO-4217 currency code (e.g., "BRL").
+  string currency = 9;
+  // Confidence score from classification model as exact decimal string (0.0000 to 1.0000).
+  string confidence_score = 10;
+  // Categorization engine source ("DETERMINISTIC_RULE", "LLM_FALLBACK", "USER_OVERRIDE").
+  string classification_source = 11;
+}
+
+// Individual line item extracted from a fiscal receipt (NFC-e / SAT).
+message ExtractedReceiptItem {
+  // Line item sequential number on the fiscal receipt.
+  int32 item_sequence = 1;
+  // Global Trade Item Number (EAN-8 / EAN-13 / GTIN-14) barcode.
+  string ean = 2;
+  // Product description normalized from fiscal receipt.
+  string description = 3;
+  // Quantity purchased as exact decimal string (e.g., "1.500").
+  string quantity = 4;
+  // Commercial unit of measure (e.g., "UN", "KG", "LT").
+  string unit_of_measure = 5;
+  // Exact decimal unit price as string (e.g., "24.90").
+  string unit_price = 6;
+  // Exact decimal total item price after discounts as string (e.g., "37.35").
+  string total_price = 7;
+  // NCM (Nomenclatura Comum do Mercosul) tax code.
+  string ncm_code = 8;
+}
+
+// Topic: `receipt.items.extracted`
+// Emitted when a Brazilian fiscal receipt (NFC-e / QR-Code SEFAZ) is scraped and parsed into line items.
+message ReceiptItemsExtractedEvent {
+  // Kafka partition key (tenant_id).
+  string tenant_id = 1;
+  // Deterministic SHA-256 hash: sha256(tenant_id + access_key_44).
+  string idempotency_key = 2;
+  // Event tracing & audit metadata.
+  EventMetadata metadata = 3;
+  // Unique receipt internal identifier.
+  string receipt_id = 4;
+  // 44-digit SEFAZ NFC-e / NF-e access key (Chave de Acesso).
+  string access_key = 5;
+  // Merchant CNPJ (unformatted 14 digits).
+  string merchant_tax_id = 6;
+  // Merchant trade name (Nome Fantasia / Razao Social).
+  string merchant_name = 7;
+  // Receipt emission timestamp (ISO-8601).
+  string issued_at = 8;
+  // Total receipt amount as exact decimal string (e.g., "412.80").
+  string total_amount = 9;
+  // Total discount amount as exact decimal string (e.g., "15.00").
+  string discount_amount = 10;
+  // ISO-4217 currency code (e.g., "BRL").
+  string currency = 11;
+  // Payment method code reported on NFC-e (e.g., "CREDIT_CARD", "PIX", "DEBIT_CARD").
+  string payment_method = 12;
+  // Extracted line items with EAN barcodes and exact prices.
+  repeated ExtractedReceiptItem items = 13;
+}
+
+// Double-entry accounting posting leg (Debit or Credit).
+message LedgerPostingLine {
+  // Ledger account code (e.g., "ASSET:BANK:CHECKING", "EXPENSE:GROCERIES").
+  string account_code = 1;
+  // Entry direction ("DEBIT" or "CREDIT").
+  string direction = 2;
+  // Exact decimal monetary amount as string (always positive, e.g., "412.80").
+  string amount = 3;
+  // ISO-4217 currency code (e.g., "BRL").
+  string currency = 4;
+}
+
+// Topic: `ledger.entry.committed`
+// Emitted by `pfm-core-ledger-java` once a balanced double-entry journal transaction is committed to PostgreSQL.
+message LedgerEntryCommittedEvent {
+  // Kafka partition key (tenant_id).
+  string tenant_id = 1;
+  // Deterministic SHA-256 hash: sha256(tenant_id + journal_entry_id).
+  string idempotency_key = 2;
+  // Event tracing & audit metadata.
+  EventMetadata metadata = 3;
+  // Immutable journal entry UUID in the Core Ledger.
+  string journal_entry_id = 4;
+  // Reference to the originating source transaction or receipt ID.
+  string source_reference_id = 5;
+  // Accounting competence date (YYYY-MM-DD).
+  string posting_date = 6;
+  // Total balanced transaction amount as exact decimal string.
+  string total_amount = 7;
+  // ISO-4217 currency code (e.g., "BRL").
+  string currency = 8;
+  // Balanced double-entry debit and credit lines (sum(DEBIT) == sum(CREDIT)).
+  repeated LedgerPostingLine postings = 9;
+  // Resulting account balance snapshot after commit as exact decimal string.
+  string resulting_balance = 10;
+}

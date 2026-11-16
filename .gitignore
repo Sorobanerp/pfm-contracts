@@ -1,5 +1,6 @@
 dist/
 build/
 .buf/
-*.pb.go
 .DS_Store
+__pycache__/
+*.pyc
