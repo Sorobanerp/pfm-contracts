@@ -102,3 +102,13 @@ make generate
 # 3. Verificar ausência de breaking changes contra a branch main
 make breaking
 ```
+
+---
+
+## 5. Endpoints gRPC & Topologia de Portas (Local Host vs. K8s Cloud)
+
+| Serviço gRPC / Event Backbone | Arquivo de Contrato Protobuf | Porta Host Local (1xxxx) | Porta Container / K8s Cloud |
+| :--- | :--- | :---: | :---: |
+| `pfm-core-ledger-java` | `proto/pfm/v1/core_ledger_service.proto` | `18210` (`GRPC_SERVER_PORT`) | `9090` |
+| `pfm-forecast-engine-go` | `proto/pfm/v1/forecast_service.proto` | `18110` (`GRPC_PORT`) | `9090` |
+| `pfm-kafka` (KRaft Event Backbone) | `proto/pfm/v1/ledger_events.proto` | `19092` (`KAFKA_BROKERS`) | `9092` |
