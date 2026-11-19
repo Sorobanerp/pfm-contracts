@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package pfm.v1;
+
+option go_package = "github.com/sorobanerp/pfm-contracts/gen/go/pfm/v1;pfmv1";
+option java_multiple_files = true;
+option java_outer_classname = "TenantAdminServiceProto";
+option java_package = "com.sorobanerp.pfm.v1";
+
+// ============================================================================
+// Tenant Admin Service (US-12 — Painel SaaS Admin)
+// Governança e gestão de tenants, planos, assinaturas e métricas agregadas.
+// Autorização exigida: PLATFORM_ADMIN
+// Zero-Trust: Nenhum dado financeiro sensível (PII, saldos contábeis, extratos)
+// é exposto através deste serviço (conforme PostgreSQL RLS e LGPD).
+// ============================================================================
+
+enum SubscriptionPlan {
+  SUBSCRIPTION_PLAN_UNSPECIFIED = 0;
+  SUBSCRIPTION_PLAN_FREE = 1;
+  SUBSCRIPTION_PLAN_INDIVIDUAL_PRO = 2;
+  SUBSCRIPTION_PLAN_FAMILY_PLUS = 3;
+}
+
+enum SubscriptionStatus {
+  SUBSCRIPTION_STATUS_UNSPECIFIED = 0;
+  SUBSCRIPTION_STATUS_TRIAL = 1;
+  SUBSCRIPTION_STATUS_ACTIVE = 2;
+  SUBSCRIPTION_STATUS_PAST_DUE = 3;
+  SUBSCRIPTION_STATUS_SUSPENDED = 4;
+}
+
+message TenantSummary {
+  string tenant_id = 1;
+  string name = 2;
+  SubscriptionPlan plan = 3;
+  SubscriptionStatus status = 4;
+  int32 max_members = 5;
+  int32 max_cards = 6;
+  int32 monthly_pdf_quota = 7;
+  int32 used_pdf_quota = 8;
+  string created_at = 9;
+  string updated_at = 10;
+}
+
+message ListTenantsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  SubscriptionStatus status_filter = 3;
+  SubscriptionPlan plan_filter = 4;
+}
+
+message ListTenantsResponse {
+  repeated TenantSummary tenants = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+message ChangeTenantPlanRequest {
+  string tenant_id = 1;
+  SubscriptionPlan new_plan = 2;
+}
+
+message ChangeTenantPlanResponse {
+  string tenant_id = 1;
+  SubscriptionPlan plan = 2;
+  int32 max_members = 3;
+  int32 max_cards = 4;
+  int32 monthly_pdf_quota = 5;
+  string updated_at = 6;
+}
+
+message UpdateSubscriptionStatusRequest {
+  string tenant_id = 1;
+  SubscriptionStatus new_status = 2;
+  string reason = 3;
+}
+
+message UpdateSubscriptionStatusResponse {
+  string tenant_id = 1;
+  SubscriptionStatus status = 2;
+  string updated_at = 3;
+}
+
+message GetPlatformMetricsRequest {
+  string period = 1;
+}
+
+message GetPlatformMetricsResponse {
+  int32 total_tenants = 1;
+  int32 active_tenants = 2;
+  int32 trial_tenants = 3;
+  int32 past_due_tenants = 4;
+  int32 suspended_tenants = 5;
+  int64 total_transactions_processed = 6;
+  int64 total_ai_tokens_consumed = 7;
+  int64 total_pdf_statements_imported = 8;
+  string generated_at = 9;
+}
+
+service TenantAdminService {
+  // Lists tenants with subscription, status, and quota metadata.
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+
+  // Changes a tenant's subscription plan.
+  rpc ChangeTenantPlan(ChangeTenantPlanRequest) returns (ChangeTenantPlanResponse);
+
+  // Updates a tenant's subscription status.
+  rpc UpdateSubscriptionStatus(UpdateSubscriptionStatusRequest) returns (UpdateSubscriptionStatusResponse);
+
+  // Retrieves aggregated platform operational metrics without PII.
+  rpc GetPlatformMetrics(GetPlatformMetricsRequest) returns (GetPlatformMetricsResponse);
+}
