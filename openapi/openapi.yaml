@@ -1,0 +1,413 @@
+openapi: 3.1.0
+info:
+  title: PFM Core Banking — Ingestion BFF & Experience API
+  version: 3.0.0
+  summary: OpenAPI 3.1 Interactive Contract for PFM Core Banking Multi-Tenant Platform
+  description: |
+    BFF HTTP/2 & HTTP/3-Ready API (`pfm-ingestion-bff-go`) connecting to `pfm-core-ledger-java` (`:9090` gRPC / `:8082` HTTP) and `pfm-forecast-engine-go` (`:9091` gRPC).
+    - **Local Development Mode (`APP_ENV=local`):** Authenticate any tenant request simply by passing `X-Tenant-ID: 11111111-1111-1111-1111-111111111111` (or `22222222-2222-2222-2222-222222222222` to test PostgreSQL 16 RLS isolation).
+    - **Monetary Precision:** All amounts are represented as exact decimal strings (`NUMERIC(19,4)` / `shopspring/decimal`, zero IEEE 754 `float64`).
+servers:
+  - url: http://localhost:8080
+    description: Local Development BFF (APP_ENV=local)
+  - url: http://localhost:18100
+    description: Local Canonical Port (1xxxx Isolation)
+
+tags:
+  - name: Dashboard & Cashflow
+    description: Real-time consolidated financial summary and 30/60/90d forecast
+  - name: Transactions & Ledger
+    description: Double-entry ledger transactions isolated by PostgreSQL 16 RLS
+  - name: Statements & Receipts
+    description: Credit card PDF statement upload (Checksum & SSE-KMS) and SEFAZ NFC-e QR Code
+  - name: AI Reconciliation Inbox
+    description: Pending AI-categorized transactions and receipt reconciliation
+  - name: Contracts & Amortization
+    description: SAC, PRICE, and Consorcio amortization & prepayment simulator
+  - name: User Profile & Family
+    description: Family members, category budgets, card PDF passwords, and LGPD rights
+  - name: SaaS Platform Admin
+    description: Tenant subscription plans, status, and anonymized platform metrics
+
+components:
+  securitySchemes:
+    TenantHeaderAuth:
+      type: apiKey
+      in: header
+      name: X-Tenant-ID
+      description: Tenant UUID for PostgreSQL 16 RLS isolation (e.g., `11111111-1111-1111-1111-111111111111`)
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantIDHeader:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      description: UUID v4 identifying the tenant for PostgreSQL 16 Row-Level Security
+      schema:
+        type: string
+        format: uuid
+        default: "11111111-1111-1111-1111-111111111111"
+      examples:
+        tenantAlpha:
+          summary: Tenant Alpha (Família Dantas)
+          value: "11111111-1111-1111-1111-111111111111"
+        tenantBeta:
+          summary: Tenant Beta (RLS Isolation Test)
+          value: "22222222-2222-2222-2222-222222222222"
+
+security:
+  - TenantHeaderAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [Dashboard & Cashflow]
+      summary: Healthcheck Liveness & Protocol Capabilities
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              example:
+                status: UP
+                service: pfm-ingestion-bff-go
+                app_env: local
+                protocols: ["HTTP/2", "HTTP/3-QUIC-Ready", "gRPC"]
+
+  /api/v1/dashboard/summary:
+    get:
+      tags: [Dashboard & Cashflow]
+      summary: Get Consolidated Financial Summary & Projected Free Cashflow
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [FAMILY, HOLDER_DANTAS, HOLDER_SPOUSE]
+            default: FAMILY
+        - name: competence_month
+          in: query
+          required: false
+          schema:
+            type: string
+            default: "2026-11"
+      responses:
+        "200":
+          description: Consolidated dashboard summary with exact decimal values
+          content:
+            application/json:
+              example:
+                tenant_id: "11111111-1111-1111-1111-111111111111"
+                scope: "FAMILY"
+                competence_month: "2026-11"
+                currency: "BRL"
+                realized_income: "18200.00"
+                settled_fixed_expenses: "5400.00"
+                current_card_invoices: "6890.45"
+                scheduled_installments: "2450.00"
+                variable_spend_to_date: "2180.00"
+                projected_free_cashflow: "1279.55"
+                custom_transactions_count: 1
+
+  /api/v1/transactions:
+    get:
+      tags: [Transactions & Ledger]
+      summary: List Tenant Ledger Transactions (Enforced by PostgreSQL 16 RLS)
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+        - name: competence_month
+          in: query
+          required: false
+          schema:
+            type: string
+            default: "2026-11"
+      responses:
+        "200":
+          description: List of transactions belonging strictly to X-Tenant-ID
+          content:
+            application/json:
+              example:
+                tenant_id: "11111111-1111-1111-1111-111111111111"
+                count: 1
+                items:
+                  - id: "99999999-1111-4111-8111-111111111111"
+                    tenant_id: "11111111-1111-1111-1111-111111111111"
+                    description: "SUPERMERCADO PAO DE ACUCAR"
+                    amount: "450.75"
+                    currency: "BRL"
+                    category_code: "VAR_SUPERMARKET"
+                    payment_method: "CREDIT_CARD"
+                    competence_month: "2026-11"
+                    installment_number: 1
+                    total_installments: 1
+                    status: "COMMITTED"
+    post:
+      tags: [Transactions & Ledger]
+      summary: Record a New Double-Entry Ledger Transaction (with RLS Isolation)
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [description, amount, category_code]
+              properties:
+                description:
+                  type: string
+                amount:
+                  type: string
+                currency:
+                  type: string
+                  default: BRL
+                category_code:
+                  type: string
+                payment_method:
+                  type: string
+                  default: CREDIT_CARD
+                competence_month:
+                  type: string
+                  default: "2026-11"
+                installment_number:
+                  type: integer
+                  default: 1
+                total_installments:
+                  type: integer
+                  default: 1
+                idempotency_key:
+                  type: string
+            examples:
+              supermarketPurchase:
+                summary: Compra de Supermercado (R$ 450,75)
+                value:
+                  description: "SUPERMERCADO PAO DE ACUCAR"
+                  amount: "450.75"
+                  currency: "BRL"
+                  category_code: "VAR_SUPERMARKET"
+                  payment_method: "CREDIT_CARD"
+                  competence_month: "2026-11"
+                  installment_number: 1
+                  total_installments: 1
+                  idempotency_key: "idem-tx-2026-11-001"
+      responses:
+        "201":
+          description: Transaction committed to ledger
+          content:
+            application/json:
+              example:
+                id: "99999999-1111-4111-8111-111111111111"
+                tenant_id: "11111111-1111-1111-1111-111111111111"
+                description: "SUPERMERCADO PAO DE ACUCAR"
+                amount: "450.75"
+                currency: "BRL"
+                category_code: "VAR_SUPERMARKET"
+                status: "COMMITTED"
+
+  /api/v1/statements/upload:
+    post:
+      tags: [Statements & Receipts]
+      summary: Upload & Parse Credit Card Statement PDF in RAM (Zero-Persistence + Checksum Validation)
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+        - name: X-Statement-Issuer
+          in: header
+          schema:
+            type: string
+            enum: [ITAU, BRADESCO, SANTANDER, NUBANK]
+            default: ITAU
+        - name: X-Card-Last4
+          in: header
+          schema:
+            type: string
+            default: "4422"
+        - name: X-File-Name
+          in: header
+          schema:
+            type: string
+            default: "fatura-itau-2026-11.pdf"
+      requestBody:
+        required: true
+        content:
+          application/pdf:
+            schema:
+              type: string
+              format: binary
+          text/plain:
+            example: |
+              ITAU PERSONNALITE - FATURA 2026-11
+              TOTAL DA FATURA: 550.00
+              10/11 SUPERMERCADO PAO DE ACUCAR 350.00
+              12/11 DROGASIL FARMACIA 200.00
+      responses:
+        "200":
+          description: Statement parsed, checksum verified, encrypted in S3 and published to Kafka
+        "409":
+          description: Checksum mismatch between header invoice total and sum of extracted line items
+
+  /api/v1/inbox:
+    get:
+      tags: [AI Reconciliation Inbox]
+      summary: List Pending AI-Categorized Items & Receipt Reconciliations
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      responses:
+        "200":
+          description: Pending inbox items for human-in-the-loop review
+          content:
+            application/json:
+              example:
+                tenant_id: "11111111-1111-1111-1111-111111111111"
+                pending_count: 2
+                items:
+                  - item_id: "inbox-001"
+                    merchant_raw: "IFD*IFOOD BR"
+                    amount: "84.90"
+                    suggested_category: "VAR_DELIVERY"
+                    confidence: "0.94"
+                    status: "PENDING_REVIEW"
+
+  /api/v1/inbox/{item_id}/confirm:
+    post:
+      tags: [AI Reconciliation Inbox]
+      summary: Confirm or Override AI Category Suggestion (Updates Learned Merchant Rules)
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+            default: "inbox-001"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              approved_category_code: "VAR_DELIVERY"
+              learn_rule: true
+      responses:
+        "200":
+          description: Inbox item confirmed and learned rule stored
+
+  /api/v1/contracts/simulate:
+    post:
+      tags: [Contracts & Amortization]
+      summary: Simulate SAC, PRICE, or Consorcio Amortization & Extra Prepayment
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              contract_id: "33333333-3333-3333-3333-333333333333"
+              amortization_system: "SAC"
+              prepayment_strategy: "REDUCE_TERM"
+              outstanding_balance: "240000.00"
+              remaining_installments: 120
+              monthly_interest_rate: "0.0085"
+              monthly_insurance_and_fees: "65.00"
+              extra_amortization_amount: "20000.00"
+      responses:
+        "200":
+          description: Amortization simulation result with interest saved and term reduction
+
+  /api/v1/profile:
+    get:
+      tags: [User Profile & Family]
+      summary: Get Current User Profile & Family Settings
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      responses:
+        "200":
+          description: User profile data
+    put:
+      tags: [User Profile & Family]
+      summary: Update User Profile Display Name
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              full_name: "Ricardo Dantas"
+      responses:
+        "200":
+          description: Profile updated
+
+  /api/v1/profile/budgets:
+    get:
+      tags: [User Profile & Family]
+      summary: List Category Budget Caps & Alert Thresholds
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      responses:
+        "200":
+          description: Category budgets list
+    post:
+      tags: [User Profile & Family]
+      summary: Upsert a Category Budget Cap
+      parameters:
+        - $ref: "#/components/parameters/TenantIDHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              category_id: "VAR_SUPERMARKET"
+              category_name: "Supermercado & Mercearia"
+              monthly_cap: "2500.00"
+              threshold_percentage: 80
+      responses:
+        "200":
+          description: Category budget saved
+
+  /api/v1/admin/tenants:
+    get:
+      tags: [SaaS Platform Admin]
+      summary: List Platform Tenants (Requires X-User-Role=PLATFORM_ADMIN)
+      parameters:
+        - name: X-User-Role
+          in: header
+          required: true
+          schema:
+            type: string
+            default: "PLATFORM_ADMIN"
+      responses:
+        "200":
+          description: Paginated tenant list
+
+  /api/v1/admin/tenants/{tenant_id}/plan:
+    put:
+      tags: [SaaS Platform Admin]
+      summary: Change Tenant Subscription Plan (FREE, PRO, FAMILY_OFFICE)
+      parameters:
+        - name: X-User-Role
+          in: header
+          required: true
+          schema:
+            type: string
+            default: "PLATFORM_ADMIN"
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: string
+            default: "11111111-1111-1111-1111-111111111111"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              new_plan: "FAMILY_OFFICE"
+      responses:
+        "200":
+          description: Tenant subscription plan updated
